@@ -275,16 +275,29 @@ function deleteHaul(id){
 
 // ───────────────────────── torn api sync ─────────────────────────
 function parseEvent(text){
-  // strip tags, normalize
-  const plain = text.replace(/<[^>]*>/g,"").replace(/\s+/g," ").trim();
-  // "Someone sent you 5x Dahlia." / "Someone sent you a Dahlia."
-  const m = plain.match(/^(.+?) sent you (?:(\d+)x |a |an |some )?(.+?)\.?$/i);
-  if(!m) return null;
-  const pilot = m[1].trim();
-  const qty = m[2] ? parseInt(m[2],10) : 1;
-  const tail = m[3].toLowerCase().trim();
+  // strip tags and any leading timestamp, normalize whitespace
+  let plain = text.replace(/<[^>]*>/g,"").replace(/\s+/g," ").trim();
+  plain = plain.replace(/^\d{1,2}:\d{2}(:\d{2})?\s*-\s*\d{1,2}\/\d{1,2}\/\d{2,4}\s*/,"").trim();
+
+  let pilot=null, qtyRaw=null, itemPart=null;
+
+  // Torn's receive format: "You were sent a Chamois Plushie from RaginXPanda"
+  let m = plain.match(/^You were sent (?:(\d+)x |a |an |some )?(.+?) from (.+?)\.?$/i);
+  if(m){ qtyRaw=m[1]; itemPart=m[2]; pilot=m[3]; }
+
+  // "You received 5x Dahlia from Player"
+  if(!m){ m = plain.match(/^You received (?:(\d+)x |a |an |some )?(.+?) from (.+?)\.?$/i);
+    if(m){ qtyRaw=m[1]; itemPart=m[2]; pilot=m[3]; } }
+
+  // Older/other phrasing: "Player sent you 5x Dahlia"
+  if(!m){ m = plain.match(/^(.+?) (?:has )?sent you (?:(\d+)x |a |an |some )?(.+?)\.?$/i);
+    if(m){ pilot=m[1]; qtyRaw=m[2]; itemPart=m[3]; } }
+
+  if(!pilot || !itemPart) return null;
+  const qty = qtyRaw ? parseInt(qtyRaw,10) : 1;
+  const tail = itemPart.toLowerCase().trim();
   for(const key of NAME_KEYS){
-    if(tail === key || tail.startsWith(key)) return {pilot, qty, itemId: BY_NAME[key].id};
+    if(tail === key || tail.startsWith(key)) return {pilot: pilot.trim(), qty, itemId: BY_NAME[key].id};
   }
   return null; // not a set item
 }
