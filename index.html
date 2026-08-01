@@ -123,12 +123,17 @@
         <span class="dim"> · paid out</span> <span id="totalPaid">$0</span>
       </span>
     </div>
-    <div class="row" style="margin-top:10px;background:var(--bg);border:1px solid var(--edge);padding:8px">
-      <span class="eyebrow">PAYOUT RATES</span>
-      <label class="amber" style="font-size:12px">per plushie $ <input id="rateP" inputmode="numeric" style="width:90px"></label>
-      <label class="bloom" style="font-size:12px">per flower $ <input id="rateF" inputmode="numeric" style="width:90px"></label>
-      <span class="faint" style="font-size:10px">Rate locks in when a haul is logged — changing it later doesn't rewrite old credits.</span>
-    </div>
+    <details style="margin-top:10px;background:var(--bg);border:1px solid var(--edge);padding:8px">
+      <summary class="eyebrow">PER-ITEM PAYOUT RATES — click to set</summary>
+      <div class="faint" style="font-size:10px;margin:6px 0">
+        What you pay per item. Pre-filled at ~75% of Torn market (plushies from trade data; flowers are estimates — check the market and tune). Rate locks in when a haul is logged, so changing it later won't rewrite past credits.
+      </div>
+      <div class="row" style="margin-bottom:8px">
+        <button id="ratesReset" style="font-size:11px;padding:4px 10px">RESET TO SUGGESTED</button>
+        <button id="ratesZero" style="font-size:11px;padding:4px 10px">ZERO ALL</button>
+      </div>
+      <div id="ratesGrid" style="display:grid;gap:4px 14px;grid-template-columns:repeat(auto-fill,minmax(230px,1fr))"></div>
+    </details>
     <div style="overflow-x:auto;margin-top:8px">
       <table id="ledgerTable">
         <thead><tr>
@@ -149,8 +154,17 @@
 
   <!-- manual haul -->
   <div class="panel">
-    <h2>MANUAL HAUL (trades / corrections)</h2>
+    <h2>MANUAL HAUL (trades / corrections / your own flights)</h2>
+    <div class="row" style="margin-bottom:8px;padding-bottom:8px;border-bottom:1px solid var(--edge)">
+      <span class="eyebrow" style="color:var(--green)">RUNNER SELF-HAUL</span>
+      <label class="mono" style="font-size:11px;color:var(--dim)">your handle
+        <input id="runnerName" placeholder="your Torn name" style="width:150px;margin-left:6px"></label>
+      <select id="selfItem"></select>
+      <input id="selfQty" inputmode="numeric" value="1" style="width:70px">
+      <button id="selfAdd" class="go">+ CREDIT ME</button>
+    </div>
     <div class="row">
+      <span class="eyebrow">OTHER MEMBER</span>
       <input id="manPilot" placeholder="Member name" style="min-width:150px" list="pilotNames">
       <datalist id="pilotNames"></datalist>
       <select id="manItem"></select>
@@ -219,6 +233,18 @@ const PLUSHIES = ITEMS.filter(i=>i.type==="p");
 const FLOWERS  = ITEMS.filter(i=>i.type==="f");
 const LS = "torn-flight-club-auto-v1";
 
+// Suggested starting payouts (~75% of Torn market). Plushies grounded in trade-forum
+// prices; flowers are rough tier estimates — verify against the item market and tune.
+const DEFAULT_RATES = {
+  sheep:300, teddy:300, kitten:300,          // Torn shop plushies — cheap, flat "grab fee"
+  wolverine:6500, stingray:6500, jaguar:12000,
+  chamois:29000, nessie:29000, redfox:30000, monkey:32000,
+  panda:48000, lion:52000, camel:63000,
+  dahlia:4000, banorchid:8000, crocus:6000, orchid:9000,   // flowers — estimates, verify
+  heather:28000, ceibo:20000, edelweiss:15000, cherry:25000,
+  peony:30000, tribulus:38000, violet:25000,
+};
+
 // ───────────────────────── state ─────────────────────────
 let storageOK = true;
 try { localStorage.setItem("__t","1"); localStorage.removeItem("__t"); }
@@ -227,22 +253,31 @@ let mem = null; // in-memory fallback
 
 const blank = () => ({
   faction:"FLIGHT CLUB", apiKey:"", points:0, pSets:0, fSets:0,
-  rates:{p:0,f:0},
+  rates:{...DEFAULT_RATES},   // per-item payout, keyed by item id
   stock:Object.fromEntries(ITEMS.map(i=>[i.id,0])),
-  hauls:[],            // {id, ts, pilot, itemId, qty, value, src:"api"|"manual"}
+  hauls:[],            // {id, ts, pilot, itemId, qty, value, over, src}
   payments:[],         // {id, ts, pilot, amount}
   seenEvents:{},       // eventId -> 1
   lastSync:0,
   logTypes:[],         // discovered "item received" log-type ids
   itemIds:{},          // torn item id -> my set item id
   target:10,           // how many sets we're building toward
+  runner:"",           // the person operating the tool, for self-haul credit
 });
 function load(){
   try{
     const raw = storageOK ? localStorage.getItem(LS) : mem;
     if(!raw) return blank();
     const p = JSON.parse(raw);
-    return {...blank(), ...p, stock:{...blank().stock, ...(p.stock||{})}, rates:{...blank().rates, ...(p.rates||{})}};
+    const s = {...blank(), ...p, stock:{...blank().stock, ...(p.stock||{})}};
+    // migrate: old flat {p, f} rate → per-item, applying the flat value to each type
+    if(p.rates && ("p" in p.rates || "f" in p.rates)){
+      s.rates = {};
+      ITEMS.forEach(i=>{ s.rates[i.id] = i.type==="p" ? (p.rates.p||0) : (p.rates.f||0); });
+    } else {
+      s.rates = {...DEFAULT_RATES, ...(p.rates||{})};
+    }
+    return s;
   }catch(e){ return blank(); }
 }
 let st = load();
@@ -261,9 +296,9 @@ function setStatus(msg, cls){ const el=$("syncStatus"); el.textContent=msg; el.c
 
 function addHaul(pilot, itemId, qty, src){
   const item = BY_ID[itemId]; if(!item || qty<1 || !pilot) return;
-  const rate = item.type==="p" ? (st.rates.p||0) : (st.rates.f||0);
+  const { value, overQty } = priceHaul(itemId, qty);
   st.stock[itemId] = (st.stock[itemId]||0) + qty;
-  st.hauls.unshift({id:Date.now()+Math.random(), ts:Date.now(), pilot, itemId, qty, value:qty*rate, src:src||"manual"});
+  st.hauls.unshift({id:Date.now()+Math.random(), ts:Date.now(), pilot, itemId, qty, value, over:overQty, src:src||"manual"});
   if(st.hauls.length>1000) st.hauls.length = 1000;
 }
 function deleteHaul(id){
@@ -302,15 +337,25 @@ function parseEvent(text){
   return null; // not a set item
 }
 
+// split an incoming quantity into paid (below target) and banked (over target) portions
+function priceHaul(itemId, qty){
+  const rate = st.rates[itemId] || 0;
+  const T = Math.max(1, st.target||1);
+  const before = st.stock[itemId]||0;
+  const paidQty = Math.max(0, Math.min(qty, T - before)); // only units that bring us up toward target
+  const overQty = qty - paidQty;                          // surplus, banked for future sets, $0 now
+  return { value: paidQty*rate, paidQty, overQty };
+}
+
 // credit a confidently-parsed incoming item; returns true if logged
 function creditParsed(uid, pilot, itemId, qty, ts, src){
   if(st.seenEvents[uid]) return false;
   st.seenEvents[uid] = 1;
   const item = BY_ID[itemId];
   if(!item || !pilot || qty<1) return false;
-  const rate = item.type==="p" ? (st.rates.p||0) : (st.rates.f||0);
+  const { value, overQty } = priceHaul(itemId, qty);
   st.stock[itemId] = (st.stock[itemId]||0) + qty;
-  st.hauls.unshift({id:Date.now()+Math.random(), ts:ts||Date.now(), pilot, itemId, qty, value:qty*rate, src:src||"api"});
+  st.hauls.unshift({id:Date.now()+Math.random(), ts:ts||Date.now(), pilot, itemId, qty, value, over:overQty, src:src||"api"});
   return true;
 }
 
@@ -483,11 +528,11 @@ function requestText(){
   const byDest = {};
   needed.forEach(r=>{ (byDest[r.dest] ||= []).push(r); });
   let out = `${st.faction} — FLIGHT REQUESTS (target ${T} sets)\n`;
-  out += `Paying $${(st.rates.p||0).toLocaleString()}/plushie · $${(st.rates.f||0).toLocaleString()}/flower\n\n`;
+  out += `Payout shown per item. Paid up to target; surplus banks for future sets.\n\n`;
   if(!needed.length) out += "Nothing needed — we're at target on everything.\n";
   for(const d of Object.keys(DEST)){
     if(!byDest[d]) continue;
-    out += `${DEST[d]}: ` + byDest[d].map(r=>`${r.name} x${r.need}`).join(", ") + "\n";
+    out += `${DEST[d]}: ` + byDest[d].map(r=>`${r.name} x${r.need} (@$${(st.rates[r.id]||0).toLocaleString()})`).join(", ") + "\n";
   }
   if(over.length){
     out += `\nDO NOT SEND (we're overstocked): ` + over.map(r=>r.name).join(", ") + "\n";
@@ -553,7 +598,7 @@ function ledgerRows(){
 function render(){
   $("factionName").textContent = st.faction || "FLIGHT CLUB";
   $("pointsBanked").textContent = st.points;
-  $("rateP").value = st.rates.p; $("rateF").value = st.rates.f;
+  buildRatesGrid();
   if(st.apiKey && !$("apiKey").value) $("apiKey").placeholder = "Key saved ✓ (hidden)";
 
   renderSetPanel($("plushiePanel"),"PLUSHIE SET",PLUSHIES,st.pSets,"var(--amber)","pSets");
@@ -590,21 +635,25 @@ function render(){
     });
   });
 
-  // datalist + manual item select
+  // datalist + manual item selects
   $("pilotNames").innerHTML = rows.map(r=>`<option value="${r.name}">`).join("");
-  if(!$("manItem").options.length)
-    $("manItem").innerHTML = ITEMS.map(i=>`<option value="${i.id}">${i.name} — ${DEST[i.dest]}</option>`).join("");
+  const opts = ITEMS.map(i=>`<option value="${i.id}">${i.name} — ${DEST[i.dest]}</option>`).join("");
+  if(!$("manItem").options.length) $("manItem").innerHTML = opts;
+  if(!$("selfItem").options.length) $("selfItem").innerHTML = opts;
+  if(st.runner && $("runnerName").value !== st.runner) $("runnerName").value = st.runner;
 
   // feed
   $("feedCount").textContent = st.hauls.length;
   $("feed").innerHTML = st.hauls.slice(0,80).map(h=>{
     const item = BY_ID[h.itemId];
+    const tag = h.src==="api" ? ["API","var(--green)"] : h.src==="self" ? ["SELF","var(--amber)"] : h.src==="log" ? ["LOG","var(--bloom)"] : ["MAN","var(--dim)"];
+    const banked = h.over>0 ? `<span class="faint" style="font-size:10px"> · ${h.over} over target, banked $0</span>` : "";
     return `<div class="feed-item">
       <span style="min-width:0;display:flex;gap:8px;align-items:center">
         <span class="mono faint" style="font-size:10px;white-space:nowrap">${when(h.ts)}</span>
-        <span class="pill" style="color:${h.src==="api"?"var(--green)":"var(--dim)"}">${h.src==="api"?"API":"MAN"}</span>
+        <span class="pill" style="color:${tag[1]}">${tag[0]}</span>
         <span>${h.pilot}</span>
-        <span class="dim">${h.qty}× ${item?.name||h.itemId}</span>
+        <span class="dim">${h.qty}× ${item?.name||h.itemId}${banked}</span>
       </span>
       <span style="display:flex;gap:10px;align-items:center">
         <span class="mono green" style="font-size:11px">${money(h.value)}</span>
@@ -646,8 +695,28 @@ $("saveKey").addEventListener("click",()=>{
 });
 $("syncBtn").addEventListener("click",sync);
 $("autoSync").addEventListener("change",e=>setAuto(e.target.checked));
-$("rateP").addEventListener("change",e=>{ st.rates.p=num(e.target.value); save(); render(); });
-$("rateF").addEventListener("change",e=>{ st.rates.f=num(e.target.value); save(); render(); });
+function buildRatesGrid(){
+  const grid = $("ratesGrid");
+  // build once; on rerenders just refresh values without stealing focus
+  if(!grid.dataset.built){
+    grid.innerHTML = ITEMS.map(i=>`
+      <label style="display:flex;align-items:center;justify-content:space-between;gap:6px;font-size:12px">
+        <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
+          <span class="mono" style="font-size:9px;color:${i.type==="p"?"var(--amber)":"var(--bloom)"}">${i.type==="p"?"PLU":"FLW"}</span> ${i.name}
+        </span>
+        <span class="mono dim">$<input data-rate="${i.id}" inputmode="numeric" style="width:80px;padding:3px 5px"></span>
+      </label>`).join("");
+    grid.dataset.built = "1";
+    grid.querySelectorAll("[data-rate]").forEach(inp=>{
+      inp.addEventListener("change", e=>{ st.rates[e.target.dataset.rate] = num(e.target.value); save(); render(); });
+    });
+  }
+  grid.querySelectorAll("[data-rate]").forEach(inp=>{
+    if(document.activeElement !== inp) inp.value = st.rates[inp.dataset.rate] || 0;
+  });
+}
+$("ratesReset").addEventListener("click",()=>{ st.rates = {...DEFAULT_RATES}; save(); render(); setStatus("Rates reset to suggested market values.","green"); });
+$("ratesZero").addEventListener("click",()=>{ ITEMS.forEach(i=>st.rates[i.id]=0); save(); render(); });
 $("targetSets").addEventListener("change",e=>{ st.target=Math.max(1,num(e.target.value)||1); save(); render(); });
 async function copyOut(text, okMsg){
   try{ await navigator.clipboard.writeText(text); setStatus(okMsg,"green"); }
@@ -665,6 +734,16 @@ $("manAdd").addEventListener("click",()=>{
   if(!pilot) return;
   addHaul(pilot, $("manItem").value, qty, "manual");
   $("manQty").value = "1";
+  save(); render();
+});
+$("runnerName").addEventListener("change",e=>{ st.runner = e.target.value.trim(); save(); });
+$("selfAdd").addEventListener("click",()=>{
+  const me = $("runnerName").value.trim();
+  if(!me){ setStatus("Set your handle first so self-hauls credit you.","red"); return; }
+  st.runner = me;
+  const qty = num($("selfQty").value)||1;
+  addHaul(me, $("selfItem").value, qty, "self");
+  $("selfQty").value = "1";
   save(); render();
 });
 $("exportPayouts").addEventListener("click",async()=>{
