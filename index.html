@@ -1,0 +1,692 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Flight Club — Torn Auto Tracker</title>
+<style>
+  :root{
+    --bg:#0C1117; --panel:#141B24; --edge:#1F2A36; --ink:#D7DEE6; --dim:#7C8896;
+    --faint:#46525F; --amber:#FFB000; --bloom:#FF7AA8; --green:#5BE38B; --red:#FF5F56;
+    --mono:ui-monospace,'Cascadia Mono','JetBrains Mono',Menlo,Consolas,monospace;
+    --sans:'Segoe UI',system-ui,-apple-system,sans-serif;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:14px}
+  .wrap{max-width:1000px;margin:0 auto;padding:20px 14px 60px}
+  h1{font-family:var(--mono);color:var(--amber);font-size:24px;letter-spacing:1px;margin:0}
+  h2{font-family:var(--mono);font-size:12px;letter-spacing:3px;color:var(--dim);margin:0 0 10px}
+  .eyebrow{font-family:var(--mono);font-size:10px;letter-spacing:3px;color:var(--dim)}
+  .panel{background:var(--panel);border:1px solid var(--edge);padding:14px;margin-top:14px}
+  .mono{font-family:var(--mono)}
+  .dim{color:var(--dim)} .faint{color:var(--faint)} .green{color:var(--green)}
+  .amber{color:var(--amber)} .bloom{color:var(--bloom)} .red{color:var(--red)}
+  input,select,button{font-family:var(--mono);font-size:13px;border-radius:2px}
+  input,select{background:var(--bg);color:var(--ink);border:1px solid var(--edge);padding:7px 8px}
+  input:focus,select:focus{outline:1px solid var(--amber)}
+  button{cursor:pointer;border:1px solid var(--edge);background:var(--bg);color:var(--ink);padding:7px 14px;letter-spacing:1px}
+  button.primary{background:var(--amber);color:#10131A;border-color:var(--amber)}
+  button.go{background:var(--green);color:#10131A;border-color:var(--green)}
+  button:disabled{opacity:.4;cursor:default}
+  button:focus-visible,input:focus-visible{outline:2px solid var(--green);outline-offset:1px}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th{font-family:var(--mono);font-size:10px;letter-spacing:1px;color:var(--dim);text-align:left;padding:6px 8px 6px 0}
+  td{padding:7px 8px 7px 0;border-top:1px solid var(--edge)}
+  .row{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+  .grid{display:grid;gap:12px;grid-template-columns:repeat(auto-fill,minmax(280px,1fr))}
+  .setnum{font-family:var(--mono);font-size:40px;line-height:1}
+  .bars{display:flex;gap:3px;height:26px;align-items:flex-end;margin-top:8px}
+  .feed-item{display:flex;justify-content:space-between;gap:10px;padding:5px 0;border-top:1px solid var(--edge);font-size:12px}
+  .pill{font-family:var(--mono);font-size:10px;padding:1px 6px;border:1px solid var(--edge);border-radius:2px}
+  .stockline{display:flex;justify-content:space-between;align-items:center;padding:4px 0;border-top:1px solid var(--edge);font-size:12px}
+  .stockline button{padding:2px 8px;font-size:12px}
+  .statusbar{font-family:var(--mono);font-size:11px;min-height:16px}
+  .hdr{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:flex-end;gap:10px;padding-bottom:12px;border-bottom:2px solid var(--amber)}
+  details summary{cursor:pointer;font-family:var(--mono);font-size:12px;letter-spacing:2px;color:var(--dim)}
+  .help{font-size:11px;color:var(--faint);line-height:1.6}
+  @media (prefers-reduced-motion: no-preference){
+    .flash{animation:flash .8s ease-out}
+    @keyframes flash{0%{background:rgba(91,227,139,.25)}100%{background:transparent}}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <!-- header -->
+  <div class="hdr">
+    <div>
+      <div class="eyebrow">TORN // FACTION FLIGHT OPERATIONS — AUTO TRACKER</div>
+      <h1 id="factionName" title="Click to rename" style="cursor:pointer">FLIGHT CLUB</h1>
+    </div>
+    <div style="text-align:right">
+      <div class="mono green" id="pointsBanked" style="font-size:32px;line-height:1">0</div>
+      <div class="eyebrow">POINTS BANKED</div>
+    </div>
+  </div>
+
+  <!-- api connection -->
+  <div class="panel">
+    <h2>API LINK</h2>
+    <div class="row">
+      <input id="apiKey" type="password" placeholder="Your Torn API key" style="flex:1;min-width:200px" autocomplete="off">
+      <button id="saveKey" class="primary">SAVE KEY</button>
+      <button id="syncBtn" class="go">SYNC NOW</button>
+      <label class="mono" style="font-size:11px;color:var(--dim);display:flex;align-items:center;gap:6px">
+        <input type="checkbox" id="autoSync" style="width:auto" checked> auto-sync 60s
+      </label>
+      <label class="mono" style="font-size:11px;color:var(--dim);display:flex;align-items:center;gap:6px" title="Also read activity logs to catch trades and market/bazaar buys. Needs a key scoped with user: log.">
+        <input type="checkbox" id="deepCapture" style="width:auto"> deep capture (logs)
+      </label>
+    </div>
+    <div class="statusbar dim" id="syncStatus" style="margin-top:8px">No key saved. Make a custom key with only user → events, basic.</div>
+    <details style="margin-top:8px">
+      <summary>SETUP / HOW IT WORKS</summary>
+      <div class="help" style="margin-top:6px">
+        <b>1. Collector account.</b> Faction members SEND plushies and flowers to this player in Torn (Items → Send). This account's key runs the tracker.<br>
+        <b>2. Make the key.</b> Torn → Settings → API Keys → custom key. For basic use pick only <span class="mono">user: events, basic</span>. To also auto-catch trades and market buys, add <span class="mono">user: log</span> and tick "deep capture" above. Never use a Full Access key. The key stays in this browser only and is sent only to api.torn.com.<br>
+        <b>3. Sync.</b> Auto-sync pulls new incoming items every 60s while this tab is open, credits the sender at your rates, and adds to stock. Every event/log is processed once — re-syncing never double-counts.<br>
+        <b>4. The one manual step.</b> Torn's API is read-only, so it can't send money. The ledger shows exactly who's owed what; you click "send" in-game and hit PAY here to clear the balance.<br>
+        <b>5. Going 24/7.</b> This file only syncs while open. Pin the tab and it runs hands-off. For true always-on (polls even when your PC is off, can ping Discord), that needs a small hosted backend — ask and I'll build it.<br>
+        <b>6. Backup.</b> Everything saves in this browser. EXPORT for a backup or to move devices (the key is never included in exports).
+      </div>
+    </details>
+  </div>
+
+  <!-- set status -->
+  <div class="row" style="margin-top:14px;align-items:stretch">
+    <div class="panel" style="flex:1;min-width:270px;margin-top:0" id="plushiePanel"></div>
+    <div class="panel" style="flex:1;min-width:270px;margin-top:0" id="flowerPanel"></div>
+  </div>
+
+  <!-- request board -->
+  <div class="panel">
+    <div class="row" style="justify-content:space-between">
+      <h2 style="margin:0">REQUEST BOARD — WHAT TO FLY FOR</h2>
+      <label class="mono" style="font-size:11px;color:var(--dim)">
+        target sets <input id="targetSets" inputmode="numeric" style="width:60px;padding:4px 6px">
+      </label>
+    </div>
+    <div id="requestBoard" style="margin-top:10px"></div>
+    <div class="row" style="margin-top:10px">
+      <button id="copyRequest" class="primary">COPY REQUEST LIST</button>
+      <button id="copyStop">COPY "STOP SENDING" LIST</button>
+    </div>
+  </div>
+
+  <!-- pay ledger -->
+  <div class="panel">
+    <div class="row" style="justify-content:space-between">
+      <h2 style="margin:0">PAY LEDGER</h2>
+      <span class="mono" style="font-size:11px">
+        <span class="dim">owed</span> <span id="totalOwed" class="red">$0</span>
+        <span class="dim"> · paid out</span> <span id="totalPaid">$0</span>
+      </span>
+    </div>
+    <div class="row" style="margin-top:10px;background:var(--bg);border:1px solid var(--edge);padding:8px">
+      <span class="eyebrow">PAYOUT RATES</span>
+      <label class="amber" style="font-size:12px">per plushie $ <input id="rateP" inputmode="numeric" style="width:90px"></label>
+      <label class="bloom" style="font-size:12px">per flower $ <input id="rateF" inputmode="numeric" style="width:90px"></label>
+      <span class="faint" style="font-size:10px">Rate locks in when a haul is logged — changing it later doesn't rewrite old credits.</span>
+    </div>
+    <div style="overflow-x:auto;margin-top:8px">
+      <table id="ledgerTable">
+        <thead><tr>
+          <th>PILOT</th><th class="amber">PLU</th><th class="bloom">FLW</th>
+          <th>EARNED</th><th>PAID</th><th>OWED</th><th>RECORD PAYMENT</th>
+        </tr></thead>
+        <tbody id="ledgerBody"></tbody>
+      </table>
+      <div class="faint" style="font-size:10px;margin-top:4px">Empty payment box pays the full owed amount. Partial payments carry the balance.</div>
+    </div>
+    <div class="row" style="margin-top:10px">
+      <button id="exportPayouts">COPY PAYOUT LIST</button>
+      <button id="exportData">EXPORT BACKUP</button>
+      <button id="importData">IMPORT BACKUP</button>
+      <input type="file" id="importFile" accept=".json" style="display:none">
+    </div>
+  </div>
+
+  <!-- manual haul -->
+  <div class="panel">
+    <h2>MANUAL HAUL (trades / corrections)</h2>
+    <div class="row">
+      <input id="manPilot" placeholder="Member name" style="min-width:150px" list="pilotNames">
+      <datalist id="pilotNames"></datalist>
+      <select id="manItem"></select>
+      <input id="manQty" inputmode="numeric" value="1" style="width:70px">
+      <button id="manAdd" class="primary">LOG HAUL</button>
+    </div>
+  </div>
+
+  <!-- incoming feed -->
+  <div class="panel">
+    <h2>INCOMING FEED — <span id="feedCount">0</span> HAULS LOGGED</h2>
+    <div id="feed"></div>
+  </div>
+
+  <!-- stock -->
+  <div class="panel">
+    <h2>STOCK ON HAND</h2>
+    <div class="grid" id="stockGrid"></div>
+  </div>
+
+  <div class="help" style="margin-top:14px">
+    <span class="mono dim">BRIEFING:</span> Plushie set = 13 items (Sheep, Teddy Bear and Kitten come from Torn city shops), flower set = 11 items.
+    Each full set exchanges at the museum for 10 points. Deleting a feed entry reverses its stock and pay credit.
+  </div>
+</div>
+
+<script>
+"use strict";
+// ───────────────────────── data ─────────────────────────
+const DEST = {
+  torn:"Torn City", mexico:"Mexico", cayman:"Cayman Is.", canada:"Canada", hawaii:"Hawaii",
+  uk:"United Kingdom", arg:"Argentina", swiss:"Switzerland", japan:"Japan", china:"China",
+  uae:"UAE", sa:"South Africa"
+};
+const ITEMS = [
+  {id:"sheep",     name:"Sheep Plushie",      type:"p", dest:"torn"},
+  {id:"teddy",     name:"Teddy Bear Plushie", type:"p", dest:"torn"},
+  {id:"kitten",    name:"Kitten Plushie",     type:"p", dest:"torn"},
+  {id:"jaguar",    name:"Jaguar Plushie",     type:"p", dest:"mexico"},
+  {id:"dahlia",    name:"Dahlia",             type:"f", dest:"mexico"},
+  {id:"stingray",  name:"Stingray Plushie",   type:"p", dest:"cayman"},
+  {id:"banorchid", name:"Banana Orchid",      type:"f", dest:"cayman"},
+  {id:"wolverine", name:"Wolverine Plushie",  type:"p", dest:"canada"},
+  {id:"crocus",    name:"Crocus",             type:"f", dest:"canada"},
+  {id:"orchid",    name:"Orchid",             type:"f", dest:"hawaii"},
+  {id:"nessie",    name:"Nessie Plushie",     type:"p", dest:"uk"},
+  {id:"redfox",    name:"Red Fox Plushie",    type:"p", dest:"uk"},
+  {id:"heather",   name:"Heather",            type:"f", dest:"uk"},
+  {id:"monkey",    name:"Monkey Plushie",     type:"p", dest:"arg"},
+  {id:"ceibo",     name:"Ceibo Flower",       type:"f", dest:"arg"},
+  {id:"chamois",   name:"Chamois Plushie",    type:"p", dest:"swiss"},
+  {id:"edelweiss", name:"Edelweiss",          type:"f", dest:"swiss"},
+  {id:"cherry",    name:"Cherry Blossom",     type:"f", dest:"japan"},
+  {id:"panda",     name:"Panda Plushie",      type:"p", dest:"china"},
+  {id:"peony",     name:"Peony",              type:"f", dest:"china"},
+  {id:"camel",     name:"Camel Plushie",      type:"p", dest:"uae"},
+  {id:"tribulus",  name:"Tribulus Omanense",  type:"f", dest:"uae"},
+  {id:"lion",      name:"Lion Plushie",       type:"p", dest:"sa"},
+  {id:"violet",    name:"African Violet",     type:"f", dest:"sa"},
+];
+const BY_ID = Object.fromEntries(ITEMS.map(i=>[i.id,i]));
+const BY_NAME = Object.fromEntries(ITEMS.map(i=>[i.name.toLowerCase(),i]));
+// Orchid is a substring of Banana Orchid — match longest names first
+const NAME_KEYS = Object.keys(BY_NAME).sort((a,b)=>b.length-a.length);
+const PLUSHIES = ITEMS.filter(i=>i.type==="p");
+const FLOWERS  = ITEMS.filter(i=>i.type==="f");
+const LS = "torn-flight-club-auto-v1";
+
+// ───────────────────────── state ─────────────────────────
+let storageOK = true;
+try { localStorage.setItem("__t","1"); localStorage.removeItem("__t"); }
+catch(e){ storageOK = false; }
+let mem = null; // in-memory fallback
+
+const blank = () => ({
+  faction:"FLIGHT CLUB", apiKey:"", points:0, pSets:0, fSets:0,
+  rates:{p:0,f:0},
+  stock:Object.fromEntries(ITEMS.map(i=>[i.id,0])),
+  hauls:[],            // {id, ts, pilot, itemId, qty, value, src:"api"|"manual"}
+  payments:[],         // {id, ts, pilot, amount}
+  seenEvents:{},       // eventId -> 1
+  lastSync:0,
+  logTypes:[],         // discovered "item received" log-type ids
+  itemIds:{},          // torn item id -> my set item id
+  target:10,           // how many sets we're building toward
+});
+function load(){
+  try{
+    const raw = storageOK ? localStorage.getItem(LS) : mem;
+    if(!raw) return blank();
+    const p = JSON.parse(raw);
+    return {...blank(), ...p, stock:{...blank().stock, ...(p.stock||{})}, rates:{...blank().rates, ...(p.rates||{})}};
+  }catch(e){ return blank(); }
+}
+let st = load();
+function save(){
+  const raw = JSON.stringify(st);
+  if(storageOK){ try{ localStorage.setItem(LS, raw); }catch(e){ setStatus("Save failed — storage full?", "red"); } }
+  else mem = raw;
+}
+
+// ───────────────────────── helpers ─────────────────────────
+const $ = id => document.getElementById(id);
+const money = n => "$" + Math.round(n||0).toLocaleString("en-US");
+const when = ts => new Date(ts).toLocaleString(undefined,{month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"});
+const num = v => Math.max(0, Math.round(Number(String(v).replace(/[^0-9.]/g,""))||0));
+function setStatus(msg, cls){ const el=$("syncStatus"); el.textContent=msg; el.className="statusbar "+(cls||"dim"); }
+
+function addHaul(pilot, itemId, qty, src){
+  const item = BY_ID[itemId]; if(!item || qty<1 || !pilot) return;
+  const rate = item.type==="p" ? (st.rates.p||0) : (st.rates.f||0);
+  st.stock[itemId] = (st.stock[itemId]||0) + qty;
+  st.hauls.unshift({id:Date.now()+Math.random(), ts:Date.now(), pilot, itemId, qty, value:qty*rate, src:src||"manual"});
+  if(st.hauls.length>1000) st.hauls.length = 1000;
+}
+function deleteHaul(id){
+  const h = st.hauls.find(x=>x.id===id); if(!h) return;
+  st.stock[h.itemId] = Math.max(0,(st.stock[h.itemId]||0)-h.qty);
+  st.hauls = st.hauls.filter(x=>x.id!==id);
+  save(); render();
+}
+
+// ───────────────────────── torn api sync ─────────────────────────
+function parseEvent(text){
+  // strip tags, normalize
+  const plain = text.replace(/<[^>]*>/g,"").replace(/\s+/g," ").trim();
+  // "Someone sent you 5x Dahlia." / "Someone sent you a Dahlia."
+  const m = plain.match(/^(.+?) sent you (?:(\d+)x |a |an |some )?(.+?)\.?$/i);
+  if(!m) return null;
+  const pilot = m[1].trim();
+  const qty = m[2] ? parseInt(m[2],10) : 1;
+  const tail = m[3].toLowerCase().trim();
+  for(const key of NAME_KEYS){
+    if(tail === key || tail.startsWith(key)) return {pilot, qty, itemId: BY_NAME[key].id};
+  }
+  return null; // not a set item
+}
+
+// credit a confidently-parsed incoming item; returns true if logged
+function creditParsed(uid, pilot, itemId, qty, ts, src){
+  if(st.seenEvents[uid]) return false;
+  st.seenEvents[uid] = 1;
+  const item = BY_ID[itemId];
+  if(!item || !pilot || qty<1) return false;
+  const rate = item.type==="p" ? (st.rates.p||0) : (st.rates.f||0);
+  st.stock[itemId] = (st.stock[itemId]||0) + qty;
+  st.hauls.unshift({id:Date.now()+Math.random(), ts:ts||Date.now(), pilot, itemId, qty, value:qty*rate, src:src||"api"});
+  return true;
+}
+
+// discover which log-type IDs represent "you received an item", cached in state
+async function ensureLogTypes(){
+  if(st.logTypes && st.logTypes.length) return st.logTypes;
+  const res = await fetch(`https://api.torn.com/torn/?selections=logtypes&key=${encodeURIComponent(st.apiKey)}&comment=FlightClubTracker`);
+  const data = await res.json();
+  if(data.error) throw new Error(`logtypes ${data.error.code}`);
+  const types = data.logtypes || {};
+  // keep types whose title implies an incoming item receipt (receive / trade / market buy / bazaar buy)
+  const wanted = [];
+  for(const [id,title] of Object.entries(types)){
+    const t = String(title).toLowerCase();
+    const incoming = /receive/.test(t)
+      || (/item/.test(t) && /(trade|market|bazaar)/.test(t) && /(buy|bought|receive|purchase)/.test(t));
+    if(incoming) wanted.push(id);
+  }
+  st.logTypes = wanted.slice(0,10); // key allows up to 10 categories
+  return st.logTypes;
+}
+
+// map Torn's numeric item IDs to our set items by matching names (self-correcting)
+async function ensureItemIds(){
+  if(st.itemIds && Object.keys(st.itemIds).length) return st.itemIds;
+  const res = await fetch(`https://api.torn.com/torn/?selections=items&key=${encodeURIComponent(st.apiKey)}&comment=FlightClubTracker`);
+  const data = await res.json();
+  if(data.error) throw new Error(`items ${data.error.code}`);
+  const items = data.items || {};
+  const map = {};
+  for(const [tid, info] of Object.entries(items)){
+    const nm = String(info.name||"").toLowerCase().trim();
+    if(BY_NAME[nm]) map[String(tid)] = BY_NAME[nm].id;
+  }
+  st.itemIds = map;
+  return map;
+}
+
+// pull activity logs and credit set items received from other players
+async function syncLogs(){
+  const idMap = await ensureItemIds();
+  const ids = await ensureLogTypes();
+  if(!ids.length) return {added:0, note:"no receive log-types found"};
+  const url = `https://api.torn.com/user/?selections=log&log=${ids.join(",")}&key=${encodeURIComponent(st.apiKey)}&comment=FlightClubTracker`;
+  const res = await fetch(url);
+  const data = await res.json();
+  if(data.error) throw new Error(`log ${data.error.code}`);
+  const log = data.log || {};
+  let added = 0;
+  const rows = Object.entries(log).sort((a,b)=>(a[1].timestamp||0)-(b[1].timestamp||0));
+  for(const [lid, row] of rows){
+    const d = row.data || {};
+    // sender can appear under several keys depending on log type
+    const senderId = d.sender ?? d.user ?? d.buyer_id ?? d.seller ?? null;
+    // items: {id: qty} map, or single item/qty pair
+    let pairs = [];
+    if(d.items && typeof d.items === "object"){ pairs = Object.entries(d.items); }
+    else if(d.item != null){ pairs = [[d.item, d.qty ?? d.quantity ?? 1]]; }
+    if(!pairs.length) continue;
+    const senderName = (d.sender_name || d.seller_name || (senderId!=null? String(senderId): "Unknown")).toString();
+    for(const [tid, q] of pairs){
+      const myId = idMap[String(tid)];
+      if(!myId) continue; // not a set item
+      const qty = parseInt(q,10)||0;
+      if(creditParsed(`log:${lid}:${tid}`, senderName, myId, qty, (row.timestamp?row.timestamp*1000:Date.now()), "log")) added++;
+    }
+  }
+  return {added, note:""};
+}
+
+async function sync(){
+  if(!st.apiKey){ setStatus("No API key saved.","red"); return; }
+  setStatus("Syncing…","dim");
+  $("syncBtn").disabled = true;
+  try{
+    // 1) EVENTS — reliable primary, catches player-to-player sends
+    const from = st.lastSync ? `&from=${Math.floor(st.lastSync/1000)-300}` : "";
+    const url = `https://api.torn.com/user/?selections=events&key=${encodeURIComponent(st.apiKey)}${from}&comment=FlightClubTracker`;
+    const res = await fetch(url);
+    const data = await res.json();
+    if(data.error){ setStatus(`Torn API error ${data.error.code}: ${data.error.error}`,"red"); return; }
+    const events = data.events || {};
+    let added = 0, skipped = 0;
+    const entries = Object.entries(events).sort((a,b)=>(a[1].timestamp||0)-(b[1].timestamp||0));
+    for(const [eid, ev] of entries){
+      const parsed = parseEvent(ev.event || "");
+      if(parsed){
+        if(creditParsed(`ev:${eid}`, parsed.pilot, parsed.itemId, parsed.qty, (ev.timestamp?ev.timestamp*1000:Date.now()), "api")) added++;
+      } else { st.seenEvents[`ev:${eid}`] = 1; skipped++; }
+    }
+
+    // 2) LOGS — optional deep capture, catches trades + market/bazaar buys
+    let logNote = "";
+    if($("deepCapture").checked){
+      try{ const r = await syncLogs(); added += r.added; logNote = r.note; }
+      catch(e){ logNote = "log read failed (key needs user: log)"; }
+    }
+
+    // trim memory of processed IDs and haul history
+    const seen = Object.keys(st.seenEvents);
+    if(seen.length>5000){ seen.slice(0,seen.length-5000).forEach(k=>delete st.seenEvents[k]); }
+    if(st.hauls.length>1000) st.hauls.length = 1000;
+    st.lastSync = Date.now();
+    save(); render();
+    setStatus(`Synced ${when(Date.now())} — ${added} new haul${added===1?"":"s"} credited${skipped?`, ${skipped} events ignored`:""}${logNote?` · ${logNote}`:""}.`, added?"green":"dim");
+  }catch(e){
+    setStatus("Sync failed — network/CORS issue. Open this file in a normal browser tab.","red");
+  }finally{
+    $("syncBtn").disabled = false;
+  }
+}
+
+let autoTimer = null;
+function setAuto(on){
+  clearInterval(autoTimer);
+  if(on) autoTimer = setInterval(sync, 60000);
+}
+
+// ── request board: what we still need vs what we're drowning in
+function requestRows(){
+  const T = Math.max(1, st.target||1);
+  return ITEMS.map(i=>{
+    const have = st.stock[i.id]||0;
+    const need = Math.max(0, T - have);      // to reach target sets
+    const over = Math.max(0, have - T);      // surplus beyond target
+    return {...i, have, need, over};
+  });
+}
+
+function renderRequestBoard(){
+  const rows = requestRows();
+  const T = Math.max(1, st.target||1);
+  const needed = rows.filter(r=>r.need>0).sort((a,b)=>b.need-a.need);
+  const over   = rows.filter(r=>r.need===0).sort((a,b)=>b.over-a.over);
+
+  const bar = r => {
+    const pct = Math.min(100, Math.round((r.have / T) * 100));
+    const col = r.need===0 ? "var(--green)" : (r.need > T*0.6 ? "var(--red)" : "var(--amber)");
+    return `<div style="flex:1;height:6px;background:var(--bg);border:1px solid var(--edge);min-width:60px">
+      <div style="height:100%;width:${pct}%;background:${col}"></div></div>`;
+  };
+
+  const line = r => `
+    <div class="row" style="gap:8px;padding:5px 0;border-top:1px solid var(--edge);flex-wrap:nowrap">
+      <span style="flex:1.6;min-width:0;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
+        <span class="mono" style="font-size:9px;color:${r.type==="p"?"var(--amber)":"var(--bloom)"}">${r.type==="p"?"PLU":"FLW"}</span>
+        ${r.name}
+        <span class="faint" style="font-size:10px"> · ${DEST[r.dest]}</span>
+      </span>
+      ${bar(r)}
+      <span class="mono" style="width:44px;text-align:right;font-size:12px;color:var(--dim)">${r.have}/${T}</span>
+      <span class="mono" style="width:64px;text-align:right;font-size:12px;color:${r.need>0?"var(--red)":"var(--green)"}">
+        ${r.need>0 ? "need "+r.need : (r.over>0 ? "+"+r.over : "✓")}
+      </span>
+    </div>`;
+
+  $("requestBoard").innerHTML = `
+    <div class="mono" style="font-size:10px;letter-spacing:2px;color:var(--red)">STILL NEEDED — ${needed.length} ITEMS</div>
+    ${needed.length ? needed.map(line).join("") : `<div class="green" style="font-size:12px;padding:6px 0">Every item is at target. Turn in your sets.</div>`}
+    ${over.length ? `
+      <div class="mono" style="font-size:10px;letter-spacing:2px;color:var(--green);margin-top:14px">STOP SENDING — AT OR OVER TARGET</div>
+      ${over.map(line).join("")}` : ""}`;
+}
+
+function requestText(){
+  const T = Math.max(1, st.target||1);
+  const rows = requestRows();
+  const needed = rows.filter(r=>r.need>0).sort((a,b)=>b.need-a.need);
+  const over   = rows.filter(r=>r.over>0).sort((a,b)=>b.over-a.over);
+  const byDest = {};
+  needed.forEach(r=>{ (byDest[r.dest] ||= []).push(r); });
+  let out = `${st.faction} — FLIGHT REQUESTS (target ${T} sets)\n`;
+  out += `Paying $${(st.rates.p||0).toLocaleString()}/plushie · $${(st.rates.f||0).toLocaleString()}/flower\n\n`;
+  if(!needed.length) out += "Nothing needed — we're at target on everything.\n";
+  for(const d of Object.keys(DEST)){
+    if(!byDest[d]) continue;
+    out += `${DEST[d]}: ` + byDest[d].map(r=>`${r.name} x${r.need}`).join(", ") + "\n";
+  }
+  if(over.length){
+    out += `\nDO NOT SEND (we're overstocked): ` + over.map(r=>r.name).join(", ") + "\n";
+  }
+  return out;
+}
+
+function stopText(){
+  const rows = requestRows().filter(r=>r.need===0).sort((a,b)=>b.over-a.over);
+  if(!rows.length) return "Nothing is overstocked — everything is still needed.";
+  return `${st.faction} — DO NOT SEND (at or over target):\n` +
+    rows.map(r=>`${r.name} — have ${r.have}${r.over?` (+${r.over} spare)`:""}`).join("\n");
+}
+
+
+
+// ───────────────────────── render ─────────────────────────
+function setsPossible(list){ return Math.min(...list.map(i=>st.stock[i.id]||0)); }
+
+function renderSetPanel(el, label, list, banked, col, setKey){
+  const min = setsPossible(list);
+  const bn = list.filter(i=>(st.stock[i.id]||0)===min).map(i=>i.name).join(", ");
+  el.innerHTML = `
+    <div class="row" style="justify-content:space-between">
+      <span class="mono" style="font-size:11px;letter-spacing:2px;color:${col}">${label}</span>
+      <span class="mono faint" style="font-size:10px">${list.length} ITEMS / SET</span>
+    </div>
+    <div class="row" style="margin-top:6px;align-items:flex-end">
+      <span class="setnum" style="color:${min>0?col:"var(--faint)"}">${String(min).padStart(2,"0")}</span>
+      <span style="font-size:11px;color:var(--dim)">sets ready<br><span class="mono">${banked} turned in · ${banked*10} pts</span></span>
+    </div>
+    <div class="bars">${list.map(i=>{
+      const n=st.stock[i.id]||0, h=Math.min(26,4+n*3);
+      return `<div title="${i.name}: ${n}" style="flex:1;display:flex;align-items:flex-end"><div style="width:100%;height:${h}px;background:${col};opacity:${n===min?1:.5}"></div></div>`;
+    }).join("")}</div>
+    <div style="font-size:11px;color:var(--dim);margin-top:6px;min-height:28px">${min===0?"Short on:":"Lowest:"} <span style="color:var(--ink)">${bn}</span>${min>0?` (${min})`:""}</div>
+    <button class="${min>0?"primary":""}" style="width:100%;margin-top:8px;${min>0?`background:${col};border-color:${col};color:#10131A`:""}" ${min<1?"disabled":""} data-turnin="${setKey}">
+      ${min>0?"TURN IN 1 SET → +10 PTS":"SET INCOMPLETE"}
+    </button>`;
+  el.querySelector("[data-turnin]")?.addEventListener("click", ()=>{
+    if(setsPossible(list)<1) return;
+    list.forEach(i=>{ st.stock[i.id]=(st.stock[i.id]||0)-1; });
+    st.points += 10; st[setKey] = (st[setKey]||0)+1;
+    save(); render();
+  });
+}
+
+function ledgerRows(){
+  const rows = new Map();
+  const touch = name => {
+    if(!rows.has(name)) rows.set(name,{name,plushies:0,flowers:0,earned:0,paid:0});
+    return rows.get(name);
+  };
+  st.hauls.forEach(h=>{
+    const r = touch(h.pilot);
+    if(BY_ID[h.itemId]?.type==="p") r.plushies+=h.qty; else r.flowers+=h.qty;
+    r.earned += h.value||0;
+  });
+  st.payments.forEach(p=>{ touch(p.pilot).paid += p.amount; });
+  return [...rows.values()].map(r=>({...r,owed:r.earned-r.paid})).sort((a,b)=>b.owed-a.owed||b.earned-a.earned);
+}
+
+function render(){
+  $("factionName").textContent = st.faction || "FLIGHT CLUB";
+  $("pointsBanked").textContent = st.points;
+  $("rateP").value = st.rates.p; $("rateF").value = st.rates.f;
+  if(st.apiKey && !$("apiKey").value) $("apiKey").placeholder = "Key saved ✓ (hidden)";
+
+  renderSetPanel($("plushiePanel"),"PLUSHIE SET",PLUSHIES,st.pSets,"var(--amber)","pSets");
+  renderSetPanel($("flowerPanel"),"FLOWER SET",FLOWERS,st.fSets,"var(--bloom)","fSets");
+  $("targetSets").value = st.target;
+  renderRequestBoard();
+
+  // ledger
+  const rows = ledgerRows();
+  $("totalOwed").textContent = money(rows.reduce((a,r)=>a+Math.max(0,r.owed),0));
+  $("totalPaid").textContent = money(st.payments.reduce((a,p)=>a+p.amount,0));
+  $("ledgerBody").innerHTML = rows.length ? rows.map(r=>`
+    <tr>
+      <td>${r.name}</td>
+      <td class="mono">${r.plushies}</td>
+      <td class="mono">${r.flowers}</td>
+      <td class="mono">${money(r.earned)}</td>
+      <td class="mono dim">${money(r.paid)}</td>
+      <td class="mono" style="color:${r.owed>0?"var(--red)":r.owed<0?"var(--amber)":"var(--green)"}">${money(r.owed)}</td>
+      <td><span class="row" style="gap:4px;flex-wrap:nowrap">
+        <input inputmode="numeric" placeholder="${Math.max(0,Math.round(r.owed))}" data-pay-input="${r.name}" style="width:90px;padding:4px 6px">
+        <button class="go" data-pay="${r.name}" style="padding:4px 10px;font-size:11px">PAY</button>
+      </span></td>
+    </tr>`).join("") : `<tr><td colspan="7" class="faint">No hauls yet. Sync the API or log one manually.</td></tr>`;
+  $("ledgerBody").querySelectorAll("[data-pay]").forEach(btn=>{
+    btn.addEventListener("click",()=>{
+      const name = btn.dataset.pay;
+      const row = rows.find(r=>r.name===name); if(!row) return;
+      const inp = $("ledgerBody").querySelector(`[data-pay-input="${CSS.escape(name)}"]`);
+      const amount = inp.value.trim()? num(inp.value) : Math.max(0,Math.round(row.owed));
+      if(amount<=0) return;
+      st.payments.unshift({id:Date.now()+Math.random(), ts:Date.now(), pilot:name, amount});
+      save(); render();
+    });
+  });
+
+  // datalist + manual item select
+  $("pilotNames").innerHTML = rows.map(r=>`<option value="${r.name}">`).join("");
+  if(!$("manItem").options.length)
+    $("manItem").innerHTML = ITEMS.map(i=>`<option value="${i.id}">${i.name} — ${DEST[i.dest]}</option>`).join("");
+
+  // feed
+  $("feedCount").textContent = st.hauls.length;
+  $("feed").innerHTML = st.hauls.slice(0,80).map(h=>{
+    const item = BY_ID[h.itemId];
+    return `<div class="feed-item">
+      <span style="min-width:0;display:flex;gap:8px;align-items:center">
+        <span class="mono faint" style="font-size:10px;white-space:nowrap">${when(h.ts)}</span>
+        <span class="pill" style="color:${h.src==="api"?"var(--green)":"var(--dim)"}">${h.src==="api"?"API":"MAN"}</span>
+        <span>${h.pilot}</span>
+        <span class="dim">${h.qty}× ${item?.name||h.itemId}</span>
+      </span>
+      <span style="display:flex;gap:10px;align-items:center">
+        <span class="mono green" style="font-size:11px">${money(h.value)}</span>
+        <button data-del="${h.id}" title="Delete (reverses stock + credit)" style="border:none;background:none;color:var(--faint);padding:0">✕</button>
+      </span>
+    </div>`;
+  }).join("") || `<div class="faint" style="font-size:12px">Nothing yet. Members send items to this account, then hit SYNC.</div>`;
+  $("feed").querySelectorAll("[data-del]").forEach(b=>b.addEventListener("click",()=>deleteHaul(Number(b.dataset.del))));
+
+  // stock grid by destination
+  const dests = [...new Set(ITEMS.map(i=>i.dest))];
+  $("stockGrid").innerHTML = dests.map(d=>`
+    <div style="background:var(--bg);border:1px solid var(--edge);padding:10px">
+      <div class="mono" style="font-size:11px;letter-spacing:1px;border-bottom:1px solid var(--faint);padding-bottom:4px"><span class="amber">${DEST[d].toUpperCase()}</span></div>
+      ${ITEMS.filter(i=>i.dest===d).map(i=>`
+        <div class="stockline">
+          <span><span class="mono" style="font-size:9px;color:${i.type==="p"?"var(--amber)":"var(--bloom)"}">${i.type==="p"?"PLU":"FLW"}</span> ${i.name}</span>
+          <span class="row" style="gap:4px;flex-wrap:nowrap">
+            <button data-adj="${i.id}|-1">−</button>
+            <span class="mono" style="width:30px;text-align:center;color:${(st.stock[i.id]||0)===0?"var(--faint)":"var(--ink)"}">${st.stock[i.id]||0}</span>
+            <button data-adj="${i.id}|1">+</button>
+          </span>
+        </div>`).join("")}
+    </div>`).join("");
+  $("stockGrid").querySelectorAll("[data-adj]").forEach(b=>b.addEventListener("click",()=>{
+    const [id,d] = b.dataset.adj.split("|");
+    st.stock[id] = Math.max(0,(st.stock[id]||0)+Number(d));
+    save(); render();
+  }));
+}
+
+// ───────────────────────── wire up ─────────────────────────
+$("saveKey").addEventListener("click",()=>{
+  const k = $("apiKey").value.trim();
+  if(!k){ setStatus("Paste a key first.","red"); return; }
+  st.apiKey = k; $("apiKey").value="";
+  save(); render();
+  setStatus("Key saved in this browser. Hit SYNC NOW.","green");
+});
+$("syncBtn").addEventListener("click",sync);
+$("autoSync").addEventListener("change",e=>setAuto(e.target.checked));
+$("rateP").addEventListener("change",e=>{ st.rates.p=num(e.target.value); save(); render(); });
+$("rateF").addEventListener("change",e=>{ st.rates.f=num(e.target.value); save(); render(); });
+$("targetSets").addEventListener("change",e=>{ st.target=Math.max(1,num(e.target.value)||1); save(); render(); });
+async function copyOut(text, okMsg){
+  try{ await navigator.clipboard.writeText(text); setStatus(okMsg,"green"); }
+  catch(e){ prompt("Copy this:", text); }
+}
+$("copyRequest").addEventListener("click",()=>copyOut(requestText(),"Request list copied — paste it in faction chat."));
+$("copyStop").addEventListener("click",()=>copyOut(stopText(),"Overstock list copied."));
+$("factionName").addEventListener("click",()=>{
+  const v = prompt("Faction / club name:", st.faction);
+  if(v!==null){ st.faction = v.toUpperCase().slice(0,32) || "FLIGHT CLUB"; save(); render(); }
+});
+$("manAdd").addEventListener("click",()=>{
+  const pilot = $("manPilot").value.trim();
+  const qty = num($("manQty").value)||1;
+  if(!pilot) return;
+  addHaul(pilot, $("manItem").value, qty, "manual");
+  $("manQty").value = "1";
+  save(); render();
+});
+$("exportPayouts").addEventListener("click",async()=>{
+  const rows = ledgerRows().filter(r=>r.owed>0);
+  const text = rows.length
+    ? "FLIGHT CLUB PAYOUTS\n" + rows.map(r=>`${r.name}: ${money(r.owed)} (${r.plushies} plushies, ${r.flowers} flowers)`).join("\n")
+    : "Nobody is owed anything. Clean books.";
+  try{ await navigator.clipboard.writeText(text); setStatus("Payout list copied to clipboard.","green"); }
+  catch(e){ prompt("Copy this:", text); }
+});
+$("exportData").addEventListener("click",()=>{
+  const data = {...st, apiKey:""}; // never export the key
+  const blob = new Blob([JSON.stringify(data,null,2)],{type:"application/json"});
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "flight-club-backup.json";
+  a.click(); URL.revokeObjectURL(a.href);
+});
+$("importData").addEventListener("click",()=>$("importFile").click());
+$("importFile").addEventListener("change",e=>{
+  const f = e.target.files[0]; if(!f) return;
+  const r = new FileReader();
+  r.onload = ()=>{
+    try{
+      const p = JSON.parse(r.result);
+      st = {...blank(), ...p, apiKey: st.apiKey, stock:{...blank().stock, ...(p.stock||{})}, rates:{...blank().rates, ...(p.rates||{})}};
+      save(); render(); setStatus("Backup imported.","green");
+    }catch(err){ setStatus("Import failed — not a valid backup file.","red"); }
+  };
+  r.readAsText(f);
+});
+
+if(!storageOK) setStatus("Heads up: this environment blocks saving — data lives in memory only. Download and open this file in a normal browser for persistence.","red");
+render();
+if(st.apiKey) setStatus(`Key saved. Last sync: ${st.lastSync?when(st.lastSync):"never"}.`,"dim");
+</script>
+</body>
+</html>
